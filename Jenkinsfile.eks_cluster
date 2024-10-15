@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'CLUSTER_NAME', defaultValue: 'dev-cluster', description: 'Name of the EKS cluster')
+        string(name: 'K8S_VERSION', defaultValue: '1.30', description: 'Kubernetes version')
+        choice(name: 'REGION', choices: ['us-east-1', 'us-west-1', 'us-west-2', 'ap-south-1'], description: 'AWS Regions')
+        string(name: 'ZONES', defaultValue: 'us-east-1a,us-east-1b', description: 'Availability zones')
+        string(name: 'NODE_TYPE', defaultValue: 't3.medium', description: 'EC2 instance type for nodes')
+        string(name: 'NODES', defaultValue: '2', description: 'Initial number of nodes')
+        string(name: 'NODES_MIN', defaultValue: '2', description: 'Minimum number of nodes')
+        string(name: 'NODES_MAX', defaultValue: '4', description: 'Maximum number of nodes')
+        string(name: 'SSH_KEY_PAIR', defaultValue: 'terraform-key', description: 'SSH public key for access')
+    }
+
+    stages {
+        stage('Create EKS Cluster') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-creds', region: "${REGION}") {
+                        sh '''
+                        eksctl create cluster \
+                        --name ${CLUSTER_NAME} \
+                        --version ${K8S_VERSION} \
+                        --region ${REGION} \
+                        --zones ${ZONES} \
+                        --node-type ${NODE_TYPE} \
+                        --nodes ${NODES} \
+                        --nodes-min ${NODES_MIN} \
+                        --nodes-max ${NODES_MAX} \
+                        --managed \
+                        --with-oidc \
+                        --ssh-access \
+                        --ssh-public-key ${SSH_KEY_PAIR} \
+                        --asg-access \
+                        --external-dns-access
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Configure kubectl') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-creds', region: "${REGION}") {
+                        sh '''
+                            aws eks --region ${REGION} update-kubeconfig --name ${CLUSTER_NAME}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Get Nodes') {
+            steps {
+                script {
+                    withAWS(credentials: 'aws-creds', region: "${REGION}") {
+                        sh '''
+                            kubectl get nodes
+                        '''
+                    }                    
+                }
+            }
+        }
+    }
+}
